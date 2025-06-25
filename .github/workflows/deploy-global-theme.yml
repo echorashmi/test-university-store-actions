@@ -210,11 +210,12 @@ jobs:
           STORE_URL="${{ matrix.store.config.shopify_url }}"
           STORE_NAME=$(echo $STORE_URL | sed 's|https://||' | sed 's|.myshopify.com||')
           
-          # Deploy theme
+          # Deploy theme to specific theme ID (updates existing theme)
+          THEME_ID="${{ matrix.store.config.theme_id }}"
           shopify theme push \
             --store="$STORE_NAME" \
             --password="$TOKEN" \
-            --theme="${{ inputs.theme_name }}" \
+            --theme="$THEME_ID" \
             --allow-live \
             --json
             

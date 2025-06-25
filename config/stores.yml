@@ -20,6 +20,7 @@ stores:
     region: "east-coast"
     type: "target"
     role: "university"
+    theme_id: "139970445390"
     customizations:
       logo: "university-2-logo.png"
       primary_color: "#DC2626"
@@ -31,6 +32,7 @@ stores:
     region: "west-coast"
     type: "target"
     role: "university"
+    theme_id: "137219833958"
     customizations:
       logo: "university-3-logo.png"
       primary_color: "#059669"
