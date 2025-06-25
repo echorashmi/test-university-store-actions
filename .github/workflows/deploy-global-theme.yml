@@ -26,6 +26,11 @@ on:
         type: boolean
         default: true
 
+permissions:
+  contents: write  # Allow pushing changes back to the repository
+  actions: read
+  checks: read
+
 jobs:
   pull-global-theme:
     runs-on: ubuntu-latest
@@ -35,6 +40,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
