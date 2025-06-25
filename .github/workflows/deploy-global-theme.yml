@@ -98,46 +98,8 @@ jobs:
       - name: Get target stores
         id: get-stores
         run: |
-          node -e "
-          const yaml = require('js-yaml');
-          const fs = require('fs');
-          
-          const config = yaml.load(fs.readFileSync('config/stores.yml', 'utf8'));
-          const groups = yaml.load(fs.readFileSync('config/groups.yml', 'utf8'));
-          
-          const targetGroup = '${{ inputs.target_group }}';
-          let targetStores = [];
-          
-          if (groups.groups[targetGroup]) {
-            targetStores = groups.groups[targetGroup];
-          } else {
-            console.error('Group not found:', targetGroup);
-            process.exit(1);
-          }
-          
-          // Filter to only target stores (exclude global store)
-          const validStores = targetStores.filter(storeName => {
-            const store = config.stores[storeName];
-            return store && store.type === 'target';
-          });
-          
-          console.log('Target stores for deployment:', validStores);
-          console.log('Total target stores:', validStores.length);
-          
-          if (validStores.length === 0) {
-            console.error('No valid target stores found for group:', targetGroup);
-            process.exit(1);
-          }
-          
-          const storeMatrix = validStores.map(storeName => ({
-            name: storeName,
-            config: config.stores[storeName]
-          }));
-          
-          // Write to GITHUB_OUTPUT using proper format
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, 'stores=' + JSON.stringify(storeMatrix) + '\\n');
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, 'total_stores=' + validStores.length + '\\n');
-          " >> $GITHUB_OUTPUT
+          echo "🎯 Running deployment preparation script..."
+          node scripts/prepare-deployment.js ${{ inputs.target_group }}
 
   deploy-to-universities:
     needs: prepare-deployment
