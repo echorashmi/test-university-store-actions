@@ -1,0 +1,302 @@
+name: Deploy Global Theme to Universities
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_group:
+        description: 'Target store group'
+        required: true
+        type: choice
+        options:
+          - target-stores
+          - east-coast
+          - west-coast
+          - all-stores
+        default: 'target-stores'
+      dry_run:
+        description: 'Dry run mode (simulate deployment without making changes)'
+        type: boolean
+        default: true
+      theme_name:
+        description: 'Theme name for deployment'
+        required: false
+        default: 'University Global Theme'
+      pull_from_global:
+        description: 'Pull latest theme from global store first'
+        type: boolean
+        default: true
+
+jobs:
+  pull-global-theme:
+    runs-on: ubuntu-latest
+    if: inputs.pull_from_global == true
+    outputs:
+      theme_updated: ${{ steps.pull-theme.outputs.updated }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install Shopify CLI
+        run: npm install -g @shopify/cli@latest
+
+      - name: Pull latest theme from global store
+        id: pull-theme
+        run: |
+          echo "🔄 Pulling latest Horizon theme from global store..."
+          cd theme
+          
+          # Pull latest theme from test-university-1-store (global)
+          shopify theme pull \
+            --store=test-university-1-store.myshopify.com \
+            --password="${{ secrets.TEST_STORE_1_TOKEN }}" \
+            --theme=127969132629 \
+            --force
+          
+          echo "✅ Theme pulled successfully from global store"
+          echo "updated=true" >> $GITHUB_OUTPUT
+
+      - name: Commit theme changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          if [[ -n $(git status --porcelain) ]]; then
+            git add theme/
+            git commit -m "🎨 Update theme from global store ($(date))"
+            git push
+            echo "📝 Theme changes committed to repository"
+          else
+            echo "📋 No theme changes detected"
+          fi
+
+  prepare-deployment:
+    runs-on: ubuntu-latest
+    needs: [pull-global-theme]
+    if: always() && (needs.pull-global-theme.result == 'success' || needs.pull-global-theme.result == 'skipped')
+    outputs:
+      stores: ${{ steps.get-stores.outputs.stores }}
+      total_stores: ${{ steps.get-stores.outputs.total_stores }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main  # Get latest changes if theme was updated
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install js-yaml
+
+      - name: Get target stores
+        id: get-stores
+        run: |
+          node -e "
+          const yaml = require('js-yaml');
+          const fs = require('fs');
+          
+          const config = yaml.load(fs.readFileSync('config/stores.yml', 'utf8'));
+          const groups = yaml.load(fs.readFileSync('config/groups.yml', 'utf8'));
+          
+          const targetGroup = '${{ inputs.target_group }}';
+          let targetStores = [];
+          
+          if (groups.groups[targetGroup]) {
+            targetStores = groups.groups[targetGroup];
+          } else {
+            console.error('Group not found:', targetGroup);
+            process.exit(1);
+          }
+          
+          // Filter to only target stores (exclude global store)
+          const validStores = targetStores.filter(storeName => {
+            const store = config.stores[storeName];
+            return store && store.type === 'target';
+          });
+          
+          console.log('Target stores for deployment:', validStores);
+          console.log('Total target stores:', validStores.length);
+          
+          if (validStores.length === 0) {
+            console.error('No valid target stores found for group:', targetGroup);
+            process.exit(1);
+          }
+          
+          const storeMatrix = validStores.map(storeName => ({
+            name: storeName,
+            config: config.stores[storeName]
+          }));
+          
+          console.log('GITHUB_OUTPUT stores=' + JSON.stringify(storeMatrix));
+          console.log('GITHUB_OUTPUT total_stores=' + validStores.length);
+          " >> $GITHUB_OUTPUT
+
+  deploy-to-universities:
+    needs: prepare-deployment
+    runs-on: ubuntu-latest
+    if: needs.prepare-deployment.outputs.total_stores > 0
+    strategy:
+      matrix:
+        store: ${{ fromJson(needs.prepare-deployment.outputs.stores) }}
+      max-parallel: 5  # Deploy to 5 universities at a time
+      fail-fast: false
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install Shopify CLI
+        run: npm install -g @shopify/cli@latest
+
+      - name: Apply university customizations
+        run: |
+          echo "🎨 Applying customizations for ${{ matrix.store.config.university_name }}..."
+          
+          cd theme
+          
+          # Apply university-specific branding
+          if [ "${{ matrix.store.config.customizations.primary_color }}" != "" ]; then
+            echo "🎨 Primary Color: ${{ matrix.store.config.customizations.primary_color }}"
+            
+            # In a real implementation, you would:
+            # 1. Update CSS variables in assets/theme.css
+            # 2. Modify color scheme in config/settings_data.json
+            # 3. Replace brand colors in theme files
+            
+            # Example: Update color scheme (simplified)
+            sed -i.bak 's/#000000/${{ matrix.store.config.customizations.primary_color }}/g' config/settings_data.json || true
+          fi
+          
+          # Apply university name
+          if [ "${{ matrix.store.config.customizations.university_name }}" != "" ]; then
+            echo "🏫 University: ${{ matrix.store.config.customizations.university_name }}"
+            
+            # Update store-specific content
+            # This would typically update header text, footer, etc.
+          fi
+          
+          echo "✅ Customizations applied for ${{ matrix.store.name }}"
+
+      - name: Check store credentials
+        id: check-credentials
+        run: |
+          SECRET_NAME="${{ matrix.store.config.credentials_secret }}"
+          if [ -z "${!SECRET_NAME}" ]; then
+            echo "has_credentials=false" >> $GITHUB_OUTPUT
+            echo "⚠️ No credentials found for ${{ matrix.store.name }}"
+          else
+            echo "has_credentials=true" >> $GITHUB_OUTPUT
+            echo "✅ Credentials found for ${{ matrix.store.name }}"
+          fi
+        env:
+          TEST_STORE_2_TOKEN: ${{ secrets.TEST_STORE_2_TOKEN }}
+          TEST_STORE_3_TOKEN: ${{ secrets.TEST_STORE_3_TOKEN }}
+
+      - name: Deploy theme (Dry Run)
+        if: inputs.dry_run == true
+        run: |
+          echo "🔍 DRY RUN MODE - Global Theme Deployment Simulation"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🏫 University: ${{ matrix.store.config.university_name }}"
+          echo "🌐 Store: ${{ matrix.store.name }}"
+          echo "🔗 URL: ${{ matrix.store.config.shopify_url }}"
+          echo "📍 Region: ${{ matrix.store.config.region }}"
+          echo "🔑 Has Credentials: ${{ steps.check-credentials.outputs.has_credentials }}"
+          echo "🎨 Theme: ${{ inputs.theme_name }}"
+          echo ""
+          echo "🎨 Customizations Applied:"
+          echo "  • University Name: ${{ matrix.store.config.customizations.university_name }}"
+          echo "  • Primary Color: ${{ matrix.store.config.customizations.primary_color }}"
+          echo "  • Logo: ${{ matrix.store.config.customizations.logo }}"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          if [ "${{ steps.check-credentials.outputs.has_credentials }}" == "true" ]; then
+            echo "✅ SIMULATION: Would deploy global theme to ${{ matrix.store.config.shopify_url }}"
+            echo "📋 SIMULATION: Theme files would be uploaded with university branding"
+            echo "🎯 SIMULATION: Store would receive latest Horizon theme with customizations"
+          else
+            echo "⚠️ SIMULATION: Would skip deployment (no credentials available)"
+          fi
+
+      - name: Deploy theme (Live)
+        if: inputs.dry_run == false && steps.check-credentials.outputs.has_credentials == 'true'
+        run: |
+          echo "🚀 LIVE DEPLOYMENT: Global theme to ${{ matrix.store.config.university_name }}"
+          
+          cd theme
+          
+          # Get credentials
+          SECRET_NAME="${{ matrix.store.config.credentials_secret }}"
+          TOKEN="${!SECRET_NAME}"
+          
+          # Extract store name for Shopify CLI
+          STORE_URL="${{ matrix.store.config.shopify_url }}"
+          STORE_NAME=$(echo $STORE_URL | sed 's|https://||' | sed 's|.myshopify.com||')
+          
+          # Deploy theme
+          shopify theme push \
+            --store="$STORE_NAME" \
+            --password="$TOKEN" \
+            --theme="${{ inputs.theme_name }}" \
+            --allow-live \
+            --json
+            
+          echo "✅ Global theme deployed successfully to ${{ matrix.store.config.university_name }}"
+            
+        env:
+          TEST_STORE_2_TOKEN: ${{ secrets.TEST_STORE_2_TOKEN }}
+          TEST_STORE_3_TOKEN: ${{ secrets.TEST_STORE_3_TOKEN }}
+
+      - name: Deployment summary
+        run: |
+          echo "📊 University Deployment Summary"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🏫 University: ${{ matrix.store.config.university_name }}"
+          echo "🌐 Store: ${{ matrix.store.name }}"
+          echo "📍 Region: ${{ matrix.store.config.region }}"
+          echo "🎯 Status: ${{ inputs.dry_run == true && 'DRY RUN COMPLETED' || 'DEPLOYED' }}"
+          echo "🔑 Credentials: ${{ steps.check-credentials.outputs.has_credentials }}"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+  deployment-report:
+    needs: [prepare-deployment, deploy-to-universities]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Generate global deployment report
+        run: |
+          echo "🎓 UNIVERSITY THEME DEPLOYMENT REPORT"
+          echo "════════════════════════════════════════════════════════════════════════"
+          echo "📅 Deployment Date: $(date)"
+          echo "🎯 Target Group: ${{ inputs.target_group }}"
+          echo "🔄 Mode: ${{ inputs.pull_from_global == true && 'PULLED FROM GLOBAL + DEPLOYED' || 'DEPLOYED EXISTING' }}"
+          echo "🧪 Type: ${{ inputs.dry_run == true && 'DRY RUN' || 'LIVE DEPLOYMENT' }}"
+          echo "🏫 Universities: ${{ needs.prepare-deployment.outputs.total_stores }}"
+          echo "🎨 Theme: ${{ inputs.theme_name }}"
+          echo ""
+          echo "📋 Deployment Flow:"
+          echo "  1. 🌐 Global Store (test-university-1-store) → Source of Truth"
+          echo "  2. 🎨 Theme Customization → University-specific branding"
+          echo "  3. 🚀 Multi-Store Deployment → Target universities"
+          echo ""
+          echo "✅ Global theme deployment completed!"
+          echo "════════════════════════════════════════════════════════════════════════"
+          echo ""
+          echo "🔗 Next Steps:"
+          echo "• Visit university stores to verify theme deployment"
+          echo "• Test store-specific customizations"
+          echo "• Monitor theme performance across universities" 

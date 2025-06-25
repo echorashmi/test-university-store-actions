@@ -1,0 +1,44 @@
+groups:
+  # Target stores only (excludes global store)
+  target-stores:
+    - test-university-2-store
+    - test-university-3-store
+  
+  # All stores (including global)
+  all-stores:
+    - test-university-1-store
+    - test-university-2-store
+    - test-university-3-store
+  
+  # Mock groups for demonstration
+  west-coast:
+    - university-of-california
+    - stanford-university
+    - university-of-washington
+  
+  east-coast:
+    - harvard-university
+    - mit
+    - yale-university
+  
+  large-public:
+    - university-of-california
+    - university-of-texas
+    - ohio-state-university
+  
+  large-private:
+    - harvard-university
+    - stanford-university
+    - mit
+  
+  # Example regional groups
+  california:
+    - university-of-california
+    - stanford-university
+    - caltech
+  
+  new-england:
+    - harvard-university
+    - mit
+    - yale-university
+    - brown-university 

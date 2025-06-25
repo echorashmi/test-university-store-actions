@@ -1,0 +1,280 @@
+name: Deploy Theme to Shopify Stores
+
+on:
+  workflow_dispatch:
+    inputs:
+      deployment_type:
+        description: 'Deployment type'
+        required: true
+        type: choice
+        options:
+          - single-store
+          - group
+          - all-stores
+        default: 'group'
+      target:
+        description: 'Store name or group name (e.g., test-stores, test-university-1-store)'
+        required: true
+        default: 'test-stores'
+      dry_run:
+        description: 'Dry run mode (simulate deployment without making changes)'
+        type: boolean
+        default: true
+      theme_name:
+        description: 'Theme name for deployment (optional)'
+        required: false
+        default: 'GitHub Actions Theme'
+
+jobs:
+  prepare-deployment:
+    runs-on: ubuntu-latest
+    outputs:
+      stores: ${{ steps.get-stores.outputs.stores }}
+      total_stores: ${{ steps.get-stores.outputs.total_stores }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: |
+          npm install js-yaml
+
+      - name: Get target stores
+        id: get-stores
+        run: |
+          node -e "
+          const yaml = require('js-yaml');
+          const fs = require('fs');
+          
+          // Load configurations
+          const stores = yaml.load(fs.readFileSync('config/stores.yml', 'utf8'));
+          const groups = yaml.load(fs.readFileSync('config/groups.yml', 'utf8'));
+          
+          const deploymentType = '${{ inputs.deployment_type }}';
+          const target = '${{ inputs.target }}';
+          
+          let targetStores = [];
+          
+          if (deploymentType === 'single-store') {
+            if (stores.stores[target]) {
+              targetStores = [target];
+            } else {
+              console.error('Store not found:', target);
+              process.exit(1);
+            }
+          } else if (deploymentType === 'group') {
+            if (groups.groups[target]) {
+              targetStores = groups.groups[target];
+            } else {
+              console.error('Group not found:', target);
+              process.exit(1);
+            }
+          } else if (deploymentType === 'all-stores') {
+            targetStores = Object.keys(stores.stores);
+          }
+          
+          // Filter to only include stores that exist in stores.yml
+          const validStores = targetStores.filter(store => stores.stores[store]);
+          
+          console.log('Target stores:', validStores);
+          console.log('Total stores:', validStores.length);
+          
+          // GitHub Actions matrix limit is 256 jobs
+          if (validStores.length > 256) {
+            console.error('Too many stores for single workflow. Consider batching.');
+            process.exit(1);
+          }
+          
+          // Output for matrix strategy
+          const storeMatrix = validStores.map(storeName => ({
+            name: storeName,
+            config: stores.stores[storeName]
+          }));
+          
+          console.log('GITHUB_OUTPUT stores=' + JSON.stringify(storeMatrix));
+          console.log('GITHUB_OUTPUT total_stores=' + validStores.length);
+          " >> $GITHUB_OUTPUT
+
+  deploy-themes:
+    needs: prepare-deployment
+    runs-on: ubuntu-latest
+    if: needs.prepare-deployment.outputs.total_stores > 0
+    strategy:
+      matrix:
+        store: ${{ fromJson(needs.prepare-deployment.outputs.stores) }}
+      max-parallel: 10  # Control concurrency to avoid rate limits
+      fail-fast: false  # Continue deploying to other stores even if one fails
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install Shopify CLI
+        run: npm install -g @shopify/cli@latest
+
+      - name: Setup theme directory
+        run: |
+          # Create theme directory if it doesn't exist
+          if [ ! -d "theme" ]; then
+            echo "Creating sample theme directory..."
+            mkdir -p theme/{assets,config,layout,locales,sections,snippets,templates}
+            
+            # Create basic theme files for testing
+            cat > theme/config/settings_schema.json << 'EOF'
+          [
+            {
+              "name": "theme_info",
+              "theme_name": "University Theme",
+              "theme_version": "1.0.0",
+              "theme_author": "GitHub Actions",
+              "theme_documentation_url": "",
+              "theme_support_url": ""
+            }
+          ]
+          EOF
+            
+            cat > theme/layout/theme.liquid << 'EOF'
+          <!doctype html>
+          <html>
+          <head>
+            <title>{{ page_title }}</title>
+            <meta name="viewport" content="width=device-width,initial-scale=1">
+            {{ content_for_header }}
+          </head>
+          <body>
+            <h1>University Store Theme - Deployed via GitHub Actions</h1>
+            <p>Store: ${{ matrix.store.config.university_name || matrix.store.name }}</p>
+            <main>{{ content_for_layout }}</main>
+          </body>
+          </html>
+          EOF
+            
+            cat > theme/templates/index.liquid << 'EOF'
+          <div class="homepage">
+            <h2>Welcome to {{ shop.name }}</h2>
+            <p>This theme was deployed automatically via GitHub Actions!</p>
+            <p>University: ${{ matrix.store.config.customizations.university_name || 'Test University' }}</p>
+          </div>
+          EOF
+          fi
+
+      - name: Apply store customizations
+        run: |
+          echo "Applying customizations for ${{ matrix.store.name }}..."
+          
+          # Apply university name customization
+          if [ "${{ matrix.store.config.customizations.university_name }}" != "" ]; then
+            echo "University: ${{ matrix.store.config.customizations.university_name }}"
+            # Here you would apply actual customizations to theme files
+            # For now, we'll just log them
+          fi
+          
+          # Apply color customizations
+          if [ "${{ matrix.store.config.customizations.primary_color }}" != "" ]; then
+            echo "Primary Color: ${{ matrix.store.config.customizations.primary_color }}"
+            # Here you would update CSS/settings files with the color
+          fi
+
+      - name: Check store credentials
+        id: check-credentials
+        run: |
+          SECRET_NAME="${{ matrix.store.config.credentials_secret }}"
+          if [ -z "${!SECRET_NAME}" ]; then
+            echo "has_credentials=false" >> $GITHUB_OUTPUT
+            echo "⚠️ No credentials found for ${{ matrix.store.name }} (secret: $SECRET_NAME)"
+          else
+            echo "has_credentials=true" >> $GITHUB_OUTPUT
+            echo "✅ Credentials found for ${{ matrix.store.name }}"
+          fi
+        env:
+          TEST_STORE_1_TOKEN: ${{ secrets.TEST_STORE_1_TOKEN }}
+          TEST_STORE_2_TOKEN: ${{ secrets.TEST_STORE_2_TOKEN }}
+          TEST_STORE_3_TOKEN: ${{ secrets.TEST_STORE_3_TOKEN }}
+
+      - name: Deploy theme (Dry Run)
+        if: inputs.dry_run == true
+        run: |
+          echo "🔍 DRY RUN MODE - No actual deployment"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Store: ${{ matrix.store.name }}"
+          echo "URL: ${{ matrix.store.config.shopify_url }}"
+          echo "Has Credentials: ${{ steps.check-credentials.outputs.has_credentials }}"
+          echo "Theme Name: ${{ inputs.theme_name }}"
+          echo "Customizations:"
+          echo "  - University: ${{ matrix.store.config.customizations.university_name }}"
+          echo "  - Color: ${{ matrix.store.config.customizations.primary_color }}"
+          echo "  - Logo: ${{ matrix.store.config.customizations.logo }}"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          if [ "${{ steps.check-credentials.outputs.has_credentials }}" == "true" ]; then
+            echo "✅ Would deploy theme to ${{ matrix.store.config.shopify_url }}"
+          else
+            echo "⚠️ Would simulate deployment (no credentials)"
+          fi
+
+      - name: Deploy theme (Live)
+        if: inputs.dry_run == false && steps.check-credentials.outputs.has_credentials == 'true'
+        run: |
+          echo "🚀 LIVE DEPLOYMENT to ${{ matrix.store.name }}"
+          
+          # Get the token from the secret
+          SECRET_NAME="${{ matrix.store.config.credentials_secret }}"
+          TOKEN="${!SECRET_NAME}"
+          
+          # Extract store name from URL for Shopify CLI
+          STORE_URL="${{ matrix.store.config.shopify_url }}"
+          STORE_NAME=$(echo $STORE_URL | sed 's|https://||' | sed 's|.myshopify.com||')
+          
+          cd theme
+          
+          # Push theme to store
+          shopify theme push \
+            --store="$STORE_NAME" \
+            --password="$TOKEN" \
+            --theme="${{ inputs.theme_name }}" \
+            --allow-live \
+            --json
+            
+        env:
+          TEST_STORE_1_TOKEN: ${{ secrets.TEST_STORE_1_TOKEN }}
+          TEST_STORE_2_TOKEN: ${{ secrets.TEST_STORE_2_TOKEN }}
+          TEST_STORE_3_TOKEN: ${{ secrets.TEST_STORE_3_TOKEN }}
+
+      - name: Deployment summary
+        run: |
+          echo "📊 Deployment Summary for ${{ matrix.store.name }}"
+          echo "Status: ${{ inputs.dry_run == true && 'DRY RUN' || 'DEPLOYED' }}"
+          echo "Store: ${{ matrix.store.config.shopify_url }}"
+          echo "Has Credentials: ${{ steps.check-credentials.outputs.has_credentials }}"
+
+  deployment-report:
+    needs: [prepare-deployment, deploy-themes]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Generate deployment report
+        run: |
+          echo "🎯 Multi-Store Theme Deployment Report"
+          echo "======================================"
+          echo "Deployment Type: ${{ inputs.deployment_type }}"
+          echo "Target: ${{ inputs.target }}"
+          echo "Mode: ${{ inputs.dry_run == true && 'DRY RUN' || 'LIVE DEPLOYMENT' }}"
+          echo "Total Stores: ${{ needs.prepare-deployment.outputs.total_stores }}"
+          echo "Theme Name: ${{ inputs.theme_name }}"
+          echo ""
+          echo "✅ Deployment completed!"
+          echo ""
+          echo "Next Steps:"
+          echo "1. Check individual job logs for detailed results"
+          echo "2. Visit stores to verify theme deployment"
+          echo "3. Test theme functionality on each store" 

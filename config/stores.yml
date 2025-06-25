@@ -1,0 +1,59 @@
+# Global store - source of truth for theme
+global_store:
+  test-university-1-store:
+    shopify_url: "https://test-university-1-store.myshopify.com"
+    credentials_secret: "TEST_STORE_1_TOKEN"
+    region: "test"
+    type: "global"
+    role: "source"
+    customizations:
+      logo: "university-1-logo.png"
+      primary_color: "#1E3A8A"
+      university_name: "Test University 1 (Global)"
+
+# Target stores - receive deployments from global store  
+stores:
+  
+  test-university-2-store:
+    shopify_url: "https://test-university-2-store.myshopify.com"
+    credentials_secret: "TEST_STORE_2_TOKEN"
+    region: "east-coast"
+    type: "target"
+    role: "university"
+    customizations:
+      logo: "university-2-logo.png"
+      primary_color: "#DC2626"
+      university_name: "East Coast University"
+  
+  test-university-3-store:
+    shopify_url: "https://test-university-3-store.myshopify.com"
+    credentials_secret: "TEST_STORE_3_TOKEN"
+    region: "west-coast"
+    type: "target"
+    role: "university"
+    customizations:
+      logo: "university-3-logo.png"
+      primary_color: "#059669"
+      university_name: "West Coast University"
+
+# Mock stores for demonstration (no real credentials)
+mock_stores:
+  university-of-california:
+    shopify_url: "https://university-of-california.myshopify.com"
+    credentials_secret: "UC_SHOPIFY_TOKEN"
+    region: "west-coast"
+    type: "large-public"
+    customizations:
+      logo: "uc-logo.png"
+      primary_color: "#003262"
+      university_name: "University of California"
+  
+  harvard-university:
+    shopify_url: "https://harvard-university.myshopify.com"
+    credentials_secret: "HARVARD_SHOPIFY_TOKEN"
+    region: "east-coast"
+    type: "large-private"
+    customizations:
+      logo: "harvard-logo.png"
+      primary_color: "#A51C30"
+      university_name: "Harvard University" 
