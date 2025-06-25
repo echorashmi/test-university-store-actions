@@ -134,8 +134,10 @@ jobs:
             config: config.stores[storeName]
           }));
           
-          console.log('GITHUB_OUTPUT stores=' + JSON.stringify(storeMatrix));
-          console.log('GITHUB_OUTPUT total_stores=' + validStores.length);
+          // Write to GITHUB_OUTPUT using proper format
+          const fs = require('fs');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, 'stores=' + JSON.stringify(storeMatrix) + '\\n');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, 'total_stores=' + validStores.length + '\\n');
           " >> $GITHUB_OUTPUT
 
   deploy-to-universities:
