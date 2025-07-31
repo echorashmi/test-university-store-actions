@@ -16,11 +16,11 @@
           "type": "text",
           "name": "t:names.heading",
           "settings": {
-            "text": "<h2>Best of Summer</h2>",
+            "text": "<ul><li><h2><strong>Best of Summer</strong></h2></li><li><strong>Latest inventory</strong></li><li><strong>Best prices</strong></li><li><strong>Terrible formatting</strong></li><li><strong>All in 1 site</strong></li></ul>",
             "width": "fit-content",
             "max_width": "normal",
             "alignment": "left",
-            "type_preset": "h1",
+            "type_preset": "h4",
             "font": "var(--font-body--family)",
             "font_size": "1rem",
             "line_height": "normal",
